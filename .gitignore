@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# uv / venvs
+.venv/
+venv/
+uv.lock
+
+# experiments outputs
+experiments/run_*/
+*.jsonl
+*.npy
+*.npz
+*.pt
+*.safetensors
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Claude Code per-machine settings
+.claude/settings.local.json
