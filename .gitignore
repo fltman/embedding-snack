@@ -11,13 +11,25 @@ __pycache__/
 venv/
 uv.lock
 
-# experiments outputs
-experiments/run_*/
+# experiments outputs — only the large per-run artifacts
+experiments/run_*/episodes.jsonl
+experiments/run_*/training.jsonl
+experiments/run_*/checkpoints/
+experiments/run_*/vectors/
+
 *.jsonl
 *.npy
 *.npz
 *.pt
 *.safetensors
+
+# but keep versioned task datasets
+!data/*.jsonl
+# and keep small per-run documentation / summaries / selected transcripts
+!experiments/run_*/notes.md
+!experiments/run_*/summary.json
+!experiments/run_*/config.json
+!experiments/run_*/logs/transcripts_*.jsonl
 
 # editor / OS
 .DS_Store

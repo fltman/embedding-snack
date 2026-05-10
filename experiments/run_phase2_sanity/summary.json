@@ -1,0 +1,16 @@
+{
+  "solo": {
+    "name": "solo",
+    "n": 20,
+    "mean_char_accuracy": 0.027979797979797976,
+    "stdev_char_accuracy": 0.053405397320699315,
+    "exact_match_rate": 0
+  },
+  "twoshot": {
+    "name": "twoshot_dialog",
+    "n": 20,
+    "mean_char_accuracy": 0.07996184371184371,
+    "stdev_char_accuracy": 0.07850172453270018,
+    "exact_match_rate": 0
+  }
+}

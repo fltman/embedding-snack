@@ -11,6 +11,12 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 DEFAULT_MODEL_A = "Qwen/Qwen3-1.7B"
+# TODO Phase 4: B must differ from A. The whole experiment is about
+# cross-model communication via a learned bridge — A == B leaves no
+# representational gap to bridge. Candidates that fit a 64GB Mac in bf16:
+#   "meta-llama/Llama-3.2-1B-Instruct"  (different family, different tokenizer)
+#   "google/gemma-2-2b-it"
+# Keep A == B only for Phase 1 plumbing and Phase 2 text baseline.
 DEFAULT_MODEL_B = "Qwen/Qwen3-1.7B"
 
 

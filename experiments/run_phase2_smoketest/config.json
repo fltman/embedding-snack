@@ -1,0 +1,12 @@
+{
+  "phase": 2,
+  "condition": "text_baseline",
+  "model_a": "Qwen/Qwen3-1.7B",
+  "model_b": "Qwen/Qwen3-1.7B",
+  "device": "mps",
+  "n_episodes": 5,
+  "n_exchanges": 3,
+  "enable_thinking": false,
+  "test_dataset": "data/cipher_test.jsonl",
+  "timestamp": "20260509_230057"
+}
