@@ -1,0 +1,14 @@
+{
+  "phase": 2,
+  "condition": "text_baseline",
+  "model_a": "Qwen/Qwen3-4B",
+  "model_b": "Qwen/Qwen3-4B",
+  "share_model_weights": true,
+  "device": "mps",
+  "n_episodes": 100,
+  "n_exchanges": 3,
+  "enable_thinking": false,
+  "key_direction": "decoding",
+  "test_dataset": "data/cipher_v3_test.jsonl",
+  "timestamp": "20260510_054131"
+}
