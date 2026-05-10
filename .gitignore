@@ -30,6 +30,10 @@ experiments/run_*/vectors/
 !experiments/run_*/summary.json
 !experiments/run_*/config.json
 !experiments/run_*/logs/transcripts_*.jsonl
+# and keep the canonical results bundle (the entry point for skeptical readers)
+!experiments/results/
+!experiments/results/*.jsonl
+!experiments/results/*.md
 
 # editor / OS
 .DS_Store
