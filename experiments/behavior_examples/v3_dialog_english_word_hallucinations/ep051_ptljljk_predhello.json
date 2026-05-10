@@ -1,0 +1,56 @@
+{
+  "episode_id": 51,
+  "plaintext": "ljljk",
+  "ciphertext": "elelh",
+  "key": "caiblhekfdgj",
+  "key_direction": "decoding",
+  "transcript": [
+    {
+      "round": 0,
+      "speaker": "A",
+      "text": "Sure, Player B. The ciphertext is \"elelh\". Could you please share the cipher key so we can decode it together?",
+      "tokens": 27
+    },
+    {
+      "round": 0,
+      "speaker": "B",
+      "text": "<answer>hello</answer>",
+      "tokens": 8
+    },
+    {
+      "round": 1,
+      "speaker": "A",
+      "text": "Thanks for the key! Let me decode \"elelh\" with the key \"hello\". The plaintext is: **world**.",
+      "tokens": 27
+    },
+    {
+      "round": 1,
+      "speaker": "B",
+      "text": "<answer>world</answer>",
+      "tokens": 8
+    },
+    {
+      "round": 2,
+      "speaker": "A",
+      "text": "The plaintext is: **world**.",
+      "tokens": 9
+    },
+    {
+      "round": 2,
+      "speaker": "B",
+      "text": "<answer>world</answer>",
+      "tokens": 8
+    }
+  ],
+  "final_b_raw": "e -> l  \nl -> o  \ne -> l  \nl -> o  \nh -> k  \n\nThe decoded plaintext is: **hello**  \n\n<answer>hello</answer>",
+  "answer_tag_found": true,
+  "predicted_plaintext": "hello",
+  "char_accuracy": 0.19999999999999996,
+  "exact_match": false,
+  "a_tokens": 63,
+  "b_tokens": 61,
+  "total_tokens": 124,
+  "tokens_used_before_answer_tag": 29,
+  "n_exchanges": 3,
+  "elapsed_seconds": 21.37841796875
+}
