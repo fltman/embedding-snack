@@ -39,7 +39,7 @@ from src.baselines.text_chat import (  # noqa: E402
     run_episode,
 )
 from src.models import DEFAULT_MODEL_A, DEFAULT_MODEL_B, load_pair, pick_device  # noqa: E402
-from src.tasks.cipher_decode import char_accuracy, read_jsonl  # noqa: E402
+from src.tasks.cipher_decode import alphabet_for_key, char_accuracy, read_jsonl  # noqa: E402
 
 DATA_DIR = ROOT / "data"
 N_EPISODES = 20
@@ -64,15 +64,22 @@ Replace YOUR_PLAINTEXT_HERE with the decoded plaintext (lowercase a-z only, \
 no spaces, no punctuation). Do not put anything after the closing tag."""
 
 
-ANSWER_RE = re.compile(r"<answer>\s*([a-zA-Z]+)\s*</answer>", re.IGNORECASE)
+ANSWER_RE = re.compile(r"<answer>(.*?)</answer>", re.IGNORECASE | re.DOTALL)
+NON_LETTER_RE = re.compile(r"[^a-z]")
 
 
 def parse_answer(text: str) -> tuple[str | None, bool]:
-    """Extract the LAST <answer>...</answer> match. Returns (plaintext, found)."""
+    """Extract the LAST <answer>...</answer> match.
+
+    Strips any non-letter content inside the tag (whitespace, punctuation,
+    asterisks, quotes), since instruction-tuned models often add cosmetic
+    formatting even when asked not to. Returns (plaintext, found).
+    """
     matches = ANSWER_RE.findall(text)
     if not matches:
         return None, False
-    return matches[-1].lower(), True
+    cleaned = NON_LETTER_RE.sub("", matches[-1].lower())
+    return cleaned, True
 
 
 def tokens_before_answer(tok, raw_output: str) -> int | None:
@@ -106,11 +113,11 @@ B_SYSTEM_WITH_EXAMPLE = (
 
 
 def format_key_lines(key: str) -> str:
-    alphabet = "abcdefghijklmnopqrstuvwxyz"
-    return "\n".join(f"{alphabet[i]} -> {key[i]}" for i in range(26))
+    alphabet = alphabet_for_key(key)
+    return "\n".join(f"{alphabet[i]} -> {key[i]}" for i in range(len(alphabet)))
 
 
-def run_solo(model, tok, episodes, max_new_tokens=300) -> list[dict]:
+def run_solo(model, tok, episodes, max_new_tokens=500) -> list[dict]:
     results = []
     for i, ep in enumerate(episodes):
         prompt = SOLO_PROMPT_TEMPLATE.format(
@@ -212,13 +219,22 @@ def main() -> None:
     p.add_argument("--solo-only", action="store_true", help="Skip the two-shot dialog check.")
     p.add_argument("--out-name", type=str, default="run_phase2_sanity",
                    help="Output directory under experiments/.")
+    p.add_argument("--dataset", type=str, default="data/cipher_v2_test.jsonl",
+                   help="Path to the JSONL test dataset (relative to repo root).")
+    p.add_argument("--n", type=int, default=N_EPISODES,
+                   help="How many episodes from the dataset.")
     args = p.parse_args()
 
     device = pick_device()
     print(f"[device] {device}\n")
 
-    test_path = DATA_DIR / "cipher_test.jsonl"
-    episodes = list(read_jsonl(test_path))[:N_EPISODES]
+    test_path = ROOT / args.dataset
+    episodes = list(read_jsonl(test_path))[: args.n]
+    head = episodes[0]
+    print(
+        f"[dataset] {args.dataset}  n={len(episodes)}  alphabet_size={len(head['key'])}  "
+        f"first: pt={head['plaintext']!r} ct={head['ciphertext']!r}"
+    )
     model_a, tok_a, model_b, tok_b = load_pair(
         DEFAULT_MODEL_A, DEFAULT_MODEL_B,
         share_model_weights=True,  # 16 GB Mac — two separate 4B copies don't fit

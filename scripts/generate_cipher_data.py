@@ -1,12 +1,17 @@
 """One-shot generator for the versioned cipher-decode datasets.
 
-Writes:
-    data/cipher_train.jsonl   (3000 episodes, seed=1)
-    data/cipher_val.jsonl     (200 episodes,  seed=2)
-    data/cipher_test.jsonl    (500 episodes,  seed=3)
+Writes both v1 (full a-z, 5-15 char plaintext) and v2 (a-l, 3-6 char plaintext)
+splits. All committed to the repo so any condition can be reproduced exactly.
 
-These files are committed to the repo. All Phase 2-7 conditions evaluate
-against the same dataset to keep comparisons apples-to-apples.
+v1 (kept for historical comparability — the marginal-4B run):
+    data/cipher_train.jsonl   3000 ep, seed=1, a-z, 5-15 chars
+    data/cipher_val.jsonl      200 ep, seed=2
+    data/cipher_test.jsonl     500 ep, seed=3
+
+v2 (current default — chosen after 4B was marginal on 26-letter version):
+    data/cipher_v2_train.jsonl 3000 ep, seed=11, a-l (12 letters), 3-6 chars
+    data/cipher_v2_val.jsonl    200 ep, seed=12
+    data/cipher_v2_test.jsonl   500 ep, seed=13
 
 Run:
     uv run python scripts/generate_cipher_data.py
@@ -19,30 +24,45 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.tasks.cipher_decode import generate_dataset, read_jsonl, write_jsonl  # noqa: E402
+from src.tasks.cipher_decode import (  # noqa: E402
+    ALPHABET,
+    ALPHABET_12,
+    generate_dataset,
+    read_jsonl,
+    write_jsonl,
+)
 
 DATA_DIR = ROOT / "data"
 
 SPLITS = [
-    ("cipher_train.jsonl", 1, 3000),
-    ("cipher_val.jsonl",   2, 200),
-    ("cipher_test.jsonl",  3, 500),
+    # filename, seed, n, alphabet, min_len, max_len
+    ("cipher_train.jsonl",     1,  3000, ALPHABET,    5, 15),
+    ("cipher_val.jsonl",       2,   200, ALPHABET,    5, 15),
+    ("cipher_test.jsonl",      3,   500, ALPHABET,    5, 15),
+    ("cipher_v2_train.jsonl", 11,  3000, ALPHABET_12, 3,  6),
+    ("cipher_v2_val.jsonl",   12,   200, ALPHABET_12, 3,  6),
+    ("cipher_v2_test.jsonl",  13,   500, ALPHABET_12, 3,  6),
 ]
 
 
 def main() -> None:
-    for filename, seed, n in SPLITS:
+    for filename, seed, n, alphabet, min_len, max_len in SPLITS:
         path = DATA_DIR / filename
-        episodes = generate_dataset(seed=seed, n=n)
+        if path.exists():
+            existing = list(read_jsonl(path))
+            if len(existing) == n:
+                print(f"{filename}: already present (n={n}); skipping")
+                continue
+        episodes = generate_dataset(seed=seed, n=n, alphabet=alphabet,
+                                    min_len=min_len, max_len=max_len)
         write_jsonl(path, episodes)
-        # Verify round-trip
         loaded = list(read_jsonl(path))
         assert len(loaded) == n, f"{filename}: wrote {n} but loaded {len(loaded)}"
         assert loaded[0] == episodes[0], f"{filename}: round-trip mismatch on first episode"
         head = loaded[0]
         print(
-            f"{filename}: n={n}  seed={seed}  "
-            f"first_id={head['id']}  pt={head['plaintext']!r}  ct={head['ciphertext']!r}"
+            f"{filename}: n={n}  seed={seed}  alphabet={alphabet[:6]}{'...' if len(alphabet)>6 else ''}({len(alphabet)})  "
+            f"pt_len=[{min_len},{max_len}]  first: pt={head['plaintext']!r} ct={head['ciphertext']!r}"
         )
 
     print(f"\nWrote datasets to {DATA_DIR}/")

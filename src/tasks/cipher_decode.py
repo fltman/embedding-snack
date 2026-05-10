@@ -7,13 +7,14 @@ Goal: B emits the decoded plaintext.
 JSONL schema (one episode per line):
     {
       "id": int,
-      "plaintext": str,        # k chars from a-z, k in [min_len, max_len]
+      "plaintext": str,        # k chars from `alphabet`, k in [min_len, max_len]
       "ciphertext": str,       # plaintext mapped through key
-      "key": str               # 26-char permutation; key[i] is image of chr(ord('a')+i)
+      "key": str               # permutation of `alphabet`; key[i] is image of alphabet[i]
     }
 
-The key is given as a 26-char string for compactness. To decode, build the
-inverse map: inv[key[i]] = chr(ord('a')+i).
+The alphabet length is implicit from the key length, so we don't store it.
+v1 datasets (cipher_*.jsonl) use the full 26-letter alphabet, plaintexts 5-15.
+v2 datasets (cipher_v2_*.jsonl) use alphabet 'a'-'l' (12), plaintexts 3-6.
 """
 from __future__ import annotations
 
@@ -24,16 +25,28 @@ from pathlib import Path
 from typing import Iterator
 
 ALPHABET = string.ascii_lowercase
+ALPHABET_12 = "abcdefghijkl"
 
 
-def generate_episode(rng: random.Random, ep_id: int, min_len: int = 5, max_len: int = 15) -> dict:
-    perm = list(ALPHABET)
+def alphabet_for_key(key: str) -> str:
+    """Infer the alphabet of an episode from its key length."""
+    return string.ascii_lowercase[: len(key)]
+
+
+def generate_episode(
+    rng: random.Random,
+    ep_id: int,
+    alphabet: str = ALPHABET,
+    min_len: int = 5,
+    max_len: int = 15,
+) -> dict:
+    perm = list(alphabet)
     rng.shuffle(perm)
     key = "".join(perm)
-    enc = {c: perm[i] for i, c in enumerate(ALPHABET)}
+    enc = {c: perm[i] for i, c in enumerate(alphabet)}
 
     length = rng.randint(min_len, max_len)
-    plaintext = "".join(rng.choices(ALPHABET, k=length))
+    plaintext = "".join(rng.choices(alphabet, k=length))
     ciphertext = "".join(enc[c] for c in plaintext)
     return {
         "id": ep_id,
@@ -43,9 +56,15 @@ def generate_episode(rng: random.Random, ep_id: int, min_len: int = 5, max_len: 
     }
 
 
-def generate_dataset(seed: int, n: int, min_len: int = 5, max_len: int = 15) -> list[dict]:
+def generate_dataset(
+    seed: int,
+    n: int,
+    alphabet: str = ALPHABET,
+    min_len: int = 5,
+    max_len: int = 15,
+) -> list[dict]:
     rng = random.Random(seed)
-    return [generate_episode(rng, i, min_len, max_len) for i in range(n)]
+    return [generate_episode(rng, i, alphabet, min_len, max_len) for i in range(n)]
 
 
 def write_jsonl(path: Path, episodes: list[dict]) -> None:
