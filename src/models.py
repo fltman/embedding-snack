@@ -10,14 +10,14 @@ from __future__ import annotations
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-DEFAULT_MODEL_A = "Qwen/Qwen3-1.7B"
+DEFAULT_MODEL_A = "Qwen/Qwen3-4B"
 # TODO Phase 4: B must differ from A. The whole experiment is about
 # cross-model communication via a learned bridge — A == B leaves no
 # representational gap to bridge. Candidates that fit a 64GB Mac in bf16:
 #   "meta-llama/Llama-3.2-1B-Instruct"  (different family, different tokenizer)
 #   "google/gemma-2-2b-it"
 # Keep A == B only for Phase 1 plumbing and Phase 2 text baseline.
-DEFAULT_MODEL_B = "Qwen/Qwen3-1.7B"
+DEFAULT_MODEL_B = "Qwen/Qwen3-4B"
 
 
 def pick_device() -> str:
@@ -55,6 +55,48 @@ def load_frozen(
         f"params={n_params/1e9:.2f}B  d_model={d_model}"
     )
     return model, tok
+
+
+def load_pair(
+    model_a_name: str,
+    model_b_name: str,
+    share_model_weights: bool | None = None,
+    device: str | None = None,
+    dtype = None,
+):
+    """Load Model A and Model B, optionally sharing one in-memory instance.
+
+    `share_model_weights=True` loads a single model and aliases it as both A
+    and B. This is required on 16 GB unified-memory hardware where two
+    separate 4B (or larger) copies don't fit. It is only legal when both
+    model names match, and is invalid for Phase 4+ where adapter gradients
+    flow through B while A.forward runs concurrently.
+
+    `share_model_weights=False` always loads two separate instances. Use this
+    in cloud / >=32GB hardware once we move past Phase 3.
+
+    `share_model_weights=None` (default) auto-shares iff both names match.
+
+    Returns (model_a, tok_a, model_b, tok_b).
+    """
+    if share_model_weights is None:
+        share_model_weights = model_a_name == model_b_name
+
+    if share_model_weights and model_a_name != model_b_name:
+        raise ValueError(
+            f"share_model_weights=True requires identical model names, "
+            f"got A={model_a_name!r}  B={model_b_name!r}"
+        )
+
+    if share_model_weights:
+        print(f"[load_pair] sharing one instance of {model_a_name} for both A and B")
+        model, tok = load_frozen(model_a_name, device=device, dtype=dtype)
+        return model, tok, model, tok
+
+    print(f"[load_pair] loading two separate instances ({model_a_name} / {model_b_name})")
+    model_a, tok_a = load_frozen(model_a_name, device=device, dtype=dtype)
+    model_b, tok_b = load_frozen(model_b_name, device=device, dtype=dtype)
+    return model_a, tok_a, model_b, tok_b
 
 
 @torch.no_grad()

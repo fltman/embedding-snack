@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.baselines.text_chat import run_episode  # noqa: E402
-from src.models import DEFAULT_MODEL_A, DEFAULT_MODEL_B, load_frozen, pick_device  # noqa: E402
+from src.models import DEFAULT_MODEL_A, DEFAULT_MODEL_B, load_pair, pick_device  # noqa: E402
 from src.tasks.cipher_decode import read_jsonl  # noqa: E402
 
 DATA_DIR = ROOT / "data"
@@ -62,6 +62,7 @@ def main() -> None:
         "condition": "text_baseline",
         "model_a": DEFAULT_MODEL_A,
         "model_b": DEFAULT_MODEL_B,
+        "share_model_weights": True,
         "device": device,
         "n_episodes": len(test),
         "n_exchanges": args.n_exchanges,
@@ -71,14 +72,10 @@ def main() -> None:
     }
     (run_dir / "config.json").write_text(json.dumps(config, indent=2))
 
-    print("\n[load] Model A...")
-    model_a, tok_a = load_frozen(DEFAULT_MODEL_A)
-    if DEFAULT_MODEL_B == DEFAULT_MODEL_A:
-        print("[load] Model B == Model A (Phase 1/2 only); reusing in-memory weights.")
-        model_b, tok_b = model_a, tok_a
-    else:
-        print("\n[load] Model B...")
-        model_b, tok_b = load_frozen(DEFAULT_MODEL_B)
+    model_a, tok_a, model_b, tok_b = load_pair(
+        DEFAULT_MODEL_A, DEFAULT_MODEL_B,
+        share_model_weights=True,  # 16 GB Mac — two separate 4B copies don't fit
+    )
 
     log_path = run_dir / "episodes.jsonl"
     accuracies: list[float] = []

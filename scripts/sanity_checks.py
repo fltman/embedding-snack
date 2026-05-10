@@ -21,13 +21,13 @@ Run:
 """
 from __future__ import annotations
 
+import argparse
 import json
+import re
 import statistics
 import sys
 import time
 from pathlib import Path
-
-import torch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -36,10 +36,9 @@ from src.baselines.text_chat import (  # noqa: E402
     A_SYSTEM,
     B_SYSTEM,
     chat_generate,
-    parse_plaintext,
     run_episode,
 )
-from src.models import DEFAULT_MODEL_A, load_frozen, pick_device  # noqa: E402
+from src.models import DEFAULT_MODEL_A, DEFAULT_MODEL_B, load_pair, pick_device  # noqa: E402
 from src.tasks.cipher_decode import char_accuracy, read_jsonl  # noqa: E402
 
 DATA_DIR = ROOT / "data"
@@ -58,8 +57,31 @@ then output that plaintext letter.
 
 Ciphertext: {ciphertext}
 
-Output ONLY the decoded plaintext. Lowercase letters only, no quotes, \
-no explanation, no prefix."""
+You may show your work if helpful. Then on the FINAL LINE, output exactly:
+<answer>YOUR_PLAINTEXT_HERE</answer>
+
+Replace YOUR_PLAINTEXT_HERE with the decoded plaintext (lowercase a-z only, \
+no spaces, no punctuation). Do not put anything after the closing tag."""
+
+
+ANSWER_RE = re.compile(r"<answer>\s*([a-zA-Z]+)\s*</answer>", re.IGNORECASE)
+
+
+def parse_answer(text: str) -> tuple[str | None, bool]:
+    """Extract the LAST <answer>...</answer> match. Returns (plaintext, found)."""
+    matches = ANSWER_RE.findall(text)
+    if not matches:
+        return None, False
+    return matches[-1].lower(), True
+
+
+def tokens_before_answer(tok, raw_output: str) -> int | None:
+    """Approximate token count up to (and not including) the first <answer> tag."""
+    idx = raw_output.find("<answer>")
+    if idx < 0:
+        return None
+    prefix = raw_output[:idx]
+    return len(tok(prefix, add_special_tokens=False).input_ids)
 
 
 B_SYSTEM_WITH_EXAMPLE = (
@@ -88,7 +110,7 @@ def format_key_lines(key: str) -> str:
     return "\n".join(f"{alphabet[i]} -> {key[i]}" for i in range(26))
 
 
-def run_solo(model, tok, episodes, max_new_tokens=50) -> list[dict]:
+def run_solo(model, tok, episodes, max_new_tokens=300) -> list[dict]:
     results = []
     for i, ep in enumerate(episodes):
         prompt = SOLO_PROMPT_TEMPLATE.format(
@@ -102,26 +124,33 @@ def run_solo(model, tok, episodes, max_new_tokens=50) -> list[dict]:
             max_new_tokens=max_new_tokens, enable_thinking=False,
         )
         elapsed = time.time() - t0
-        pred = parse_plaintext(raw)
+        parsed, found = parse_answer(raw)
+        n_before = tokens_before_answer(tok, raw)
+        pt_pred = parsed or ""
         results.append({
-            "episode_id": ep["id"],
-            "plaintext": ep["plaintext"],
+            "ep": ep["id"],
             "ciphertext": ep["ciphertext"],
+            "plaintext_gt": ep["plaintext"],
             "key": ep["key"],
             "raw_output": raw,
-            "predicted": pred,
-            "char_accuracy": char_accuracy(pred, ep["plaintext"]),
-            "exact_match": pred == ep["plaintext"],
-            "tokens": n_tok,
+            "answer_tag_found": found,
+            "parsed_plaintext": pt_pred,
+            "char_acc": char_accuracy(pt_pred, ep["plaintext"]),
+            "exact_match": pt_pred == ep["plaintext"],
+            "tokens_used": n_tok,
+            "tokens_used_before_answer_tag": n_before,
             "elapsed": elapsed,
         })
         last = results[-1]
-        running_acc = statistics.mean(r["char_accuracy"] for r in results)
+        running_acc = statistics.mean(r["char_acc"] for r in results)
+        running_compliance = statistics.mean(int(r["answer_tag_found"]) for r in results)
         print(
             f"  [solo {i+1:2d}/{len(episodes)}] "
-            f"pt={ep['plaintext']!r:>17}  pred={pred!r:>17}  "
-            f"acc={last['char_accuracy']:.2f}  em={int(last['exact_match'])}  "
-            f"tok={n_tok}  t={elapsed:4.1f}s  running_acc={running_acc:.3f}"
+            f"pt={ep['plaintext']!r:>17}  pred={pt_pred!r:>17}  "
+            f"tag={'Y' if found else 'N'}  "
+            f"acc={last['char_acc']:.2f}  em={int(last['exact_match'])}  "
+            f"tok={n_tok}  pre_tag={n_before}  t={elapsed:5.1f}s  "
+            f"running_acc={running_acc:.3f}  compliance={running_compliance:.2f}"
         )
     return results
 
@@ -150,48 +179,73 @@ def run_twoshot(model_a, tok_a, model_b, tok_b, episodes) -> list[dict]:
 
 
 def summarize(name, results) -> dict:
-    accs = [r["char_accuracy"] for r in results]
+    accs = [r.get("char_acc", r.get("char_accuracy", 0.0)) for r in results]
     ems = [r["exact_match"] for r in results]
+    compliance_present = "answer_tag_found" in results[0]
+    tokens_used = [r.get("tokens_used", r.get("tokens", 0)) for r in results]
     s = {
         "name": name,
         "n": len(results),
-        "mean_char_accuracy": statistics.mean(accs),
-        "stdev_char_accuracy": statistics.stdev(accs) if len(accs) > 1 else 0.0,
+        "mean_char_acc": statistics.mean(accs),
+        "stdev_char_acc": statistics.stdev(accs) if len(accs) > 1 else 0.0,
         "exact_match_rate": statistics.mean(ems),
+        "mean_tokens_used": statistics.mean(tokens_used),
     }
-    print(f"\n[{name}] n={s['n']}  mean_acc={s['mean_char_accuracy']:.3f}  "
-          f"stdev={s['stdev_char_accuracy']:.3f}  em_rate={s['exact_match_rate']:.3f}")
+    if compliance_present:
+        compliance = [int(r["answer_tag_found"]) for r in results]
+        s["format_compliance_rate"] = statistics.mean(compliance)
+        # tokens_before_answer_tag only meaningful when the tag is found
+        pre_tags = [r["tokens_used_before_answer_tag"] for r in results if r["tokens_used_before_answer_tag"] is not None]
+        if pre_tags:
+            s["mean_tokens_before_answer_tag"] = statistics.mean(pre_tags)
+            s["median_tokens_before_answer_tag"] = statistics.median(pre_tags)
+    print(f"\n[{name}] n={s['n']}  mean_acc={s['mean_char_acc']:.3f}  "
+          f"em_rate={s['exact_match_rate']:.3f}  mean_tok={s['mean_tokens_used']:.0f}")
+    if "format_compliance_rate" in s:
+        print(f"           format_compliance={s['format_compliance_rate']:.2f}  "
+              f"mean_tok_before_tag={s.get('mean_tokens_before_answer_tag', 0):.1f}")
     return s
 
 
 def main() -> None:
+    p = argparse.ArgumentParser()
+    p.add_argument("--solo-only", action="store_true", help="Skip the two-shot dialog check.")
+    p.add_argument("--out-name", type=str, default="run_phase2_sanity",
+                   help="Output directory under experiments/.")
+    args = p.parse_args()
+
     device = pick_device()
     print(f"[device] {device}\n")
 
     test_path = DATA_DIR / "cipher_test.jsonl"
     episodes = list(read_jsonl(test_path))[:N_EPISODES]
-    print(f"[load] Model: {DEFAULT_MODEL_A}")
-    model, tok = load_frozen(DEFAULT_MODEL_A)
+    model_a, tok_a, model_b, tok_b = load_pair(
+        DEFAULT_MODEL_A, DEFAULT_MODEL_B,
+        share_model_weights=True,  # 16 GB Mac — two separate 4B copies don't fit
+    )
 
     print(f"\n=== Check 1: SOLO upper bound (n={len(episodes)}) ===")
-    solo_results = run_solo(model, tok, episodes)
+    solo_results = run_solo(model_a, tok_a, episodes)
     solo_summary = summarize("solo", solo_results)
 
-    print(f"\n=== Check 2: TWO-SHOT dialog (n={len(episodes)}) ===")
-    twoshot_results = run_twoshot(model, tok, model, tok, episodes)
-    twoshot_summary = summarize("twoshot_dialog", twoshot_results)
-
-    out_dir = ROOT / "experiments" / "run_phase2_sanity"
+    out_dir = ROOT / "experiments" / args.out_name
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "solo.jsonl").write_text(
         "\n".join(json.dumps(r) for r in solo_results) + "\n"
     )
-    (out_dir / "twoshot.jsonl").write_text(
-        "\n".join(json.dumps(r) for r in twoshot_results) + "\n"
-    )
-    (out_dir / "summary.json").write_text(
-        json.dumps({"solo": solo_summary, "twoshot": twoshot_summary}, indent=2)
-    )
+
+    summary_payload = {"solo": solo_summary}
+
+    if not args.solo_only:
+        print(f"\n=== Check 2: TWO-SHOT dialog (n={len(episodes)}) ===")
+        twoshot_results = run_twoshot(model_a, tok_a, model_b, tok_b, episodes)
+        twoshot_summary = summarize("twoshot_dialog", twoshot_results)
+        (out_dir / "twoshot.jsonl").write_text(
+            "\n".join(json.dumps(r) for r in twoshot_results) + "\n"
+        )
+        summary_payload["twoshot"] = twoshot_summary
+
+    (out_dir / "summary.json").write_text(json.dumps(summary_payload, indent=2))
     print(f"\n[done] Outputs in {out_dir}")
 
 

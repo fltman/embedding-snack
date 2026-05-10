@@ -1,0 +1,9 @@
+{
+  "solo": {
+    "name": "solo",
+    "n": 20,
+    "mean_char_accuracy": 0.0844017094017094,
+    "stdev_char_accuracy": 0.06333829901194558,
+    "exact_match_rate": 0
+  }
+}
