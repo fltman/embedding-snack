@@ -1,0 +1,15 @@
+{
+  "phase": 3,
+  "condition": "random_adapter_baseline",
+  "model_a": "Qwen/Qwen3-4B",
+  "model_b": "Qwen/Qwen3-4B",
+  "share_model_weights": true,
+  "device": "mps",
+  "n_episodes": 100,
+  "key_direction": "decoding",
+  "test_dataset": "data/cipher_v3_test.jsonl",
+  "adapter": "random_orthogonal",
+  "adapter_seed": 42,
+  "max_new_tokens": 500,
+  "timestamp": "20260510_084705"
+}

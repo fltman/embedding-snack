@@ -1,0 +1,10 @@
+{
+  "n_episodes": 100,
+  "mean_char_accuracy": 0.09793650501545238,
+  "stdev_char_accuracy": 0.1291979872638838,
+  "exact_match_rate": 0,
+  "format_compliance_rate": 0.97,
+  "mean_total_tokens": 123.62,
+  "mean_elapsed_seconds": 30.066123805046082,
+  "median_elapsed_seconds": 20.137314915657043
+}
