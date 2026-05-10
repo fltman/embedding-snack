@@ -1,0 +1,13 @@
+{
+  "solo": {
+    "name": "solo",
+    "n": 20,
+    "mean_char_acc": 0.7841666666666667,
+    "stdev_char_acc": 0.32576832258523847,
+    "exact_match_rate": 0.5,
+    "mean_tokens_used": 25.65,
+    "format_compliance_rate": 1,
+    "mean_tokens_before_answer_tag": 16.35,
+    "median_tokens_before_answer_tag": 16.0
+  }
+}

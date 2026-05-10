@@ -7,45 +7,63 @@ keep the comparison with the adapter condition apples-to-apples.
 Per Phase 2 spec: each episode gets `n_exchanges` rounds (default 3), then
 B is explicitly prompted for the plaintext via the same `<answer>` tag
 protocol used in the solo sanity check.
+
+Key presentation: B's system prompt contains the cipher key as an explicit
+alphabet-aligned table (`a -> X`, `b -> Y`, ...), not as a flat string. The
+flat-string presentation (run_006) caused FM1 (positional-index lookup
+error). The table format removes the ambiguity by binding each entry to a
+specific alphabet letter.
 """
 from __future__ import annotations
 
 import torch
 
-from src.tasks.cipher_decode import char_accuracy, parse_answer, tokens_before_answer
+from src.tasks.cipher_decode import (
+    alphabet_for_key,
+    char_accuracy,
+    parse_answer,
+    tokens_before_answer,
+)
 
 A_SYSTEM = (
     "You are Player A in a cooperative cipher-decoding game with Player B. "
-    "You see only the CIPHERTEXT. Player B sees the cipher key. "
+    "You see only the CIPHERTEXT. Player B has the cipher key. "
     "Cooperate with Player B to recover the plaintext. "
     "Keep messages short. Do not output the final plaintext yourself — "
     "Player B will produce it."
 )
 
-B_SYSTEM_ENCODING = (
-    "You are Player B in a cooperative cipher-decoding game with Player A. "
-    "You see only the ENCODING key: a permutation of the alphabet (lowercase letters), "
-    "where key[i] is the ciphertext image of the i-th plaintext letter. "
-    "To DECODE a ciphertext letter, find that letter in the key string and output "
-    "the alphabet letter at that position. "
-    "Player A sees only the ciphertext. "
-    "Cooperate with Player A to recover the plaintext. "
-    "Keep messages short. "
-    "When asked for the final answer, output it on the FINAL LINE as exactly:\n"
-    "<answer>YOUR_PLAINTEXT_HERE</answer>"
-)
+B_SYSTEM_ENCODING_TEMPLATE = """\
+You are Player B in a cooperative cipher-decoding game with Player A.
 
-B_SYSTEM_DECODING = (
-    "You are Player B in a cooperative cipher-decoding game with Player A. "
-    "You see only a DECODING key: a permutation of the alphabet (lowercase letters), "
-    "where the i-th character is the plaintext for the i-th ciphertext letter. "
-    "To DECODE a ciphertext letter C, find C's alphabet position i and output key[i]. "
-    "Player A sees only the ciphertext. "
-    "Cooperate with Player A to recover the plaintext. "
-    "Keep messages short. "
-    "When asked for the final answer, output it on the FINAL LINE as exactly:\n"
-    "<answer>YOUR_PLAINTEXT_HERE</answer>"
-)
+You have an ENCODING table that maps each plaintext letter to its ciphertext:
+
+{key_table}
+
+To DECODE a ciphertext letter, find it on the RIGHT side of the table and \
+output the corresponding letter on the LEFT.
+
+Player A sees only the ciphertext (you do not see it directly until they tell you).
+Cooperate with Player A to recover the plaintext.
+
+Keep messages short. When asked for the final answer, output it on the FINAL LINE as exactly:
+<answer>YOUR_PLAINTEXT_HERE</answer>"""
+
+B_SYSTEM_DECODING_TEMPLATE = """\
+You are Player B in a cooperative cipher-decoding game with Player A.
+
+You have a DECODING table that maps each ciphertext letter to its plaintext:
+
+{key_table}
+
+To DECODE a ciphertext letter, find it on the LEFT side of the table and \
+output the corresponding letter on the RIGHT.
+
+Player A sees only the ciphertext (you do not see it directly until they tell you).
+Cooperate with Player A to recover the plaintext.
+
+Keep messages short. When asked for the final answer, output it on the FINAL LINE as exactly:
+<answer>YOUR_PLAINTEXT_HERE</answer>"""
 
 FINAL_PROMPT = (
     "Now produce the final answer. You may show brief work first, then on the FINAL LINE "
@@ -55,8 +73,34 @@ FINAL_PROMPT = (
 )
 
 
-# Backwards-compat alias used by the older sanity_checks two-shot run.
-B_SYSTEM = B_SYSTEM_ENCODING
+def format_key_table(key: str, key_direction: str = "decoding") -> str:
+    """Render the key as an alphabet-aligned table.
+
+    For `decoding` direction: `key[i]` is the plaintext for ciphertext alphabet[i],
+        rendered as `{alphabet[i]} -> {key[i]}` (left=ciphertext, right=plaintext).
+    For `encoding` direction: `key[i]` is the ciphertext for plaintext alphabet[i],
+        rendered as `{alphabet[i]} -> {key[i]}` (left=plaintext, right=ciphertext).
+    Same line format; the surrounding system-prompt text disambiguates the meaning.
+    """
+    alphabet = alphabet_for_key(key)
+    return "\n".join(f"{alphabet[i]} -> {key[i]}" for i in range(len(alphabet)))
+
+
+def make_b_system(key: str, key_direction: str = "decoding") -> str:
+    """Build B's full system prompt by filling in the key table for this episode."""
+    template = (
+        B_SYSTEM_DECODING_TEMPLATE if key_direction == "decoding"
+        else B_SYSTEM_ENCODING_TEMPLATE
+    )
+    return template.format(key_table=format_key_table(key, key_direction))
+
+
+# Backwards-compat aliases used by older code paths and the two-shot sanity check.
+# These are *placeholder* strings — they don't have the key table substituted and
+# should not be used to actually run B. Use make_b_system() instead.
+B_SYSTEM = B_SYSTEM_ENCODING_TEMPLATE
+B_SYSTEM_ENCODING = B_SYSTEM_ENCODING_TEMPLATE
+B_SYSTEM_DECODING = B_SYSTEM_DECODING_TEMPLATE
 
 
 def _apply_template(tok, messages, enable_thinking: bool = False) -> str:
@@ -120,7 +164,7 @@ def run_episode(
     plaintext = episode["plaintext"]
 
     if b_system is None:
-        b_system = B_SYSTEM_ENCODING if key_direction == "encoding" else B_SYSTEM_DECODING
+        b_system = make_b_system(key, key_direction=key_direction)
 
     a_history = [
         {"role": "system", "content": a_system},
@@ -128,7 +172,8 @@ def run_episode(
     ]
     b_history = [
         {"role": "system", "content": b_system},
-        {"role": "user", "content": f"The cipher key is: {key}\n\nTalk to Player A."},
+        # Key is now in B's system prompt as a table; no need to repeat in user turn.
+        {"role": "user", "content": "Player A will speak first. Respond when they share the ciphertext."},
     ]
 
     transcript: list[dict] = []

@@ -36,6 +36,7 @@ from src.baselines.text_chat import (  # noqa: E402
     A_SYSTEM,
     B_SYSTEM,
     chat_generate,
+    make_b_system,
     run_episode,
 )
 from src.models import DEFAULT_MODEL_A, DEFAULT_MODEL_B, load_pair, pick_device  # noqa: E402
@@ -172,6 +173,62 @@ def run_solo(model, tok, episodes, max_new_tokens=500, key_direction: str = "enc
     return results
 
 
+def run_solo_via_system_key(model, tok, episodes, key_direction: str = "decoding",
+                             max_new_tokens: int = 500) -> list[dict]:
+    """Sanity check for the dialog setup: same key presentation B will get in
+    dialog (key as table in system prompt, ciphertext in a user turn), but
+    no Player A involved. If this preserves the ~90% solo accuracy from
+    run_005, the table-in-system format is equivalent and the dialog drop
+    is purely from the dialog protocol.
+    """
+    results = []
+    for i, ep in enumerate(episodes):
+        b_system = make_b_system(ep["key"], key_direction=key_direction)
+        user_msg = (
+            f"Decode this ciphertext: {ep['ciphertext']}\n\n"
+            f"Produce your answer on the FINAL LINE as exactly:\n"
+            f"<answer>YOUR_PLAINTEXT_HERE</answer>"
+        )
+        messages = [
+            {"role": "system", "content": b_system},
+            {"role": "user", "content": user_msg},
+        ]
+        t0 = time.time()
+        raw, n_tok = chat_generate(
+            model, tok, messages,
+            max_new_tokens=max_new_tokens, enable_thinking=False,
+        )
+        elapsed = time.time() - t0
+        parsed, found = parse_answer(raw)
+        n_before = tokens_before_answer(tok, raw)
+        pt_pred = parsed or ""
+        results.append({
+            "ep": ep["id"],
+            "ciphertext": ep["ciphertext"],
+            "plaintext_gt": ep["plaintext"],
+            "key": ep["key"],
+            "raw_output": raw,
+            "answer_tag_found": found,
+            "parsed_plaintext": pt_pred,
+            "char_acc": char_accuracy(pt_pred, ep["plaintext"]),
+            "exact_match": pt_pred == ep["plaintext"],
+            "tokens_used": n_tok,
+            "tokens_used_before_answer_tag": n_before,
+            "elapsed": elapsed,
+        })
+        running_acc = statistics.mean(r["char_acc"] for r in results)
+        running_compliance = statistics.mean(int(r["answer_tag_found"]) for r in results)
+        print(
+            f"  [solo-syskey {i+1:2d}/{len(episodes)}] "
+            f"pt={ep['plaintext']!r:>17}  pred={pt_pred!r:>17}  "
+            f"tag={'Y' if found else 'N'}  "
+            f"acc={results[-1]['char_acc']:.2f}  em={int(results[-1]['exact_match'])}  "
+            f"tok={n_tok}  pre_tag={n_before}  t={elapsed:5.1f}s  "
+            f"running_acc={running_acc:.3f}  compliance={running_compliance:.2f}"
+        )
+    return results
+
+
 def run_twoshot(model_a, tok_a, model_b, tok_b, episodes) -> list[dict]:
     results = []
     for i, ep in enumerate(episodes):
@@ -227,6 +284,11 @@ def summarize(name, results) -> dict:
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--solo-only", action="store_true", help="Skip the two-shot dialog check.")
+    p.add_argument("--mode", type=str, default="user-prompt",
+                   choices=["user-prompt", "system-key"],
+                   help="user-prompt: original solo with the full task in one user message. "
+                        "system-key: key as table in system prompt, ciphertext in user — "
+                        "matches the dialog-B setup for safety-checking format equivalence.")
     p.add_argument("--out-name", type=str, default="run_phase2_sanity",
                    help="Output directory under experiments/.")
     p.add_argument("--dataset", type=str, default="data/cipher_v2_test.jsonl",
@@ -254,8 +316,14 @@ def main() -> None:
         share_model_weights=True,  # 16 GB Mac — two separate 4B copies don't fit
     )
 
-    print(f"\n=== Check 1: SOLO upper bound (n={len(episodes)}, key_direction={args.key_direction}) ===")
-    solo_results = run_solo(model_a, tok_a, episodes, key_direction=args.key_direction)
+    if args.mode == "system-key":
+        print(f"\n=== Check 1: SOLO via system-key ({args.key_direction}, n={len(episodes)}) ===")
+        solo_results = run_solo_via_system_key(
+            model_a, tok_a, episodes, key_direction=args.key_direction,
+        )
+    else:
+        print(f"\n=== Check 1: SOLO upper bound (n={len(episodes)}, key_direction={args.key_direction}) ===")
+        solo_results = run_solo(model_a, tok_a, episodes, key_direction=args.key_direction)
     solo_summary = summarize("solo", solo_results)
 
     out_dir = ROOT / "experiments" / args.out_name
