@@ -1,0 +1,14 @@
+{
+  "ep": 14,
+  "ciphertext": "cccll",
+  "plaintext_gt": "eeebb",
+  "key": "djeckihalgfb",
+  "raw_output": "Let's decode the ciphertext \"cccll\" using the given substitution cipher table:\n\n- c -> e\n- c -> e\n- l -> b\n- l -> b\n- l -> b\n\nSo, the decoded plaintext is: **eebbb**\n\n<answer>eebbb</answer>",
+  "answer_tag_found": true,
+  "parsed_plaintext": "eebbb",
+  "char_acc": 0.8,
+  "exact_match": false,
+  "tokens_used": 62,
+  "tokens_used_before_answer_tag": 53,
+  "elapsed": 5.569247007369995
+}

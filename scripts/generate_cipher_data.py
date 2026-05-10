@@ -28,6 +28,7 @@ from src.tasks.cipher_decode import (  # noqa: E402
     ALPHABET,
     ALPHABET_12,
     generate_dataset,
+    invert_key,
     read_jsonl,
     write_jsonl,
 )
@@ -42,6 +43,15 @@ SPLITS = [
     ("cipher_v2_train.jsonl", 11,  3000, ALPHABET_12, 3,  6),
     ("cipher_v2_val.jsonl",   12,   200, ALPHABET_12, 3,  6),
     ("cipher_v2_test.jsonl",  13,   500, ALPHABET_12, 3,  6),
+]
+
+# v3 = identical episodes to v2 (same plaintexts, ciphertexts) but the `key` field
+# is the inverted (decoding-direction) permutation. Same data, different presentation.
+# Lets us isolate "does presenting the key as decoding-map vs encoding-map change accuracy".
+V3_DERIVATIONS = [
+    ("cipher_v3_train.jsonl", "cipher_v2_train.jsonl", ALPHABET_12),
+    ("cipher_v3_val.jsonl",   "cipher_v2_val.jsonl",   ALPHABET_12),
+    ("cipher_v3_test.jsonl",  "cipher_v2_test.jsonl",  ALPHABET_12),
 ]
 
 
@@ -63,6 +73,27 @@ def main() -> None:
         print(
             f"{filename}: n={n}  seed={seed}  alphabet={alphabet[:6]}{'...' if len(alphabet)>6 else ''}({len(alphabet)})  "
             f"pt_len=[{min_len},{max_len}]  first: pt={head['plaintext']!r} ct={head['ciphertext']!r}"
+        )
+
+    for v3_name, v2_name, alphabet in V3_DERIVATIONS:
+        v3_path = DATA_DIR / v3_name
+        v2_path = DATA_DIR / v2_name
+        if v3_path.exists():
+            print(f"{v3_name}: already present; skipping")
+            continue
+        v2 = list(read_jsonl(v2_path))
+        v3 = []
+        for ep in v2:
+            new_ep = dict(ep)
+            new_ep["key"] = invert_key(ep["key"], alphabet)
+            new_ep["key_direction"] = "decoding"
+            v3.append(new_ep)
+        write_jsonl(v3_path, v3)
+        head = v3[0]
+        print(
+            f"{v3_name}: derived from {v2_name}  n={len(v3)}  "
+            f"first: pt={head['plaintext']!r} ct={head['ciphertext']!r}  "
+            f"v2_key={v2[0]['key']!r}  v3_key={head['key']!r}"
         )
 
     print(f"\nWrote datasets to {DATA_DIR}/")

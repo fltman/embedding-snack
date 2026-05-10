@@ -1,0 +1,14 @@
+{
+  "ep": 15,
+  "ciphertext": "eigh",
+  "plaintext_gt": "ljfd",
+  "key": "kegclbfdjaih",
+  "raw_output": "Let's decode the ciphertext \"eigh\" using the given substitution cipher table:\n\n- **e** \u2192 **l**\n- **i** \u2192 **j**\n- **g** \u2192 **f**\n- **h** \u2192 **d**\n\nSo, \"eigh\" decodes to \"lfjd\".\n\n<answer>lfjd</answer>",
+  "answer_tag_found": true,
+  "parsed_plaintext": "lfjd",
+  "char_acc": 0.5,
+  "exact_match": false,
+  "tokens_used": 70,
+  "tokens_used_before_answer_tag": 61,
+  "elapsed": 6.390690088272095
+}

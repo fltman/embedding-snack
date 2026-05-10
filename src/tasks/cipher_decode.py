@@ -33,6 +33,21 @@ def alphabet_for_key(key: str) -> str:
     return string.ascii_lowercase[: len(key)]
 
 
+def invert_key(key: str, alphabet: str | None = None) -> str:
+    """Return the inverse permutation of a key string.
+
+    If `key` is an encoding map (key[i] = ciphertext for plaintext alphabet[i]),
+    the result is the decoding map (out[j] = plaintext for ciphertext alphabet[j]).
+    Calling invert_key twice returns the original.
+    """
+    alphabet = alphabet or alphabet_for_key(key)
+    out = [""] * len(alphabet)
+    pos = {c: i for i, c in enumerate(alphabet)}
+    for i, c in enumerate(key):
+        out[pos[c]] = alphabet[i]
+    return "".join(out)
+
+
 def generate_episode(
     rng: random.Random,
     ep_id: int,
@@ -124,3 +139,36 @@ def char_accuracy(pred: str, target: str) -> float:
 
 def exact_match(pred: str, target: str) -> bool:
     return pred == target
+
+
+# ---------------------------------------------------------------------------
+# Answer-tag parsing (shared between solo sanity check and dialog baseline)
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+ANSWER_RE = _re.compile(r"<answer>(.*?)</answer>", _re.IGNORECASE | _re.DOTALL)
+_NON_LETTER_RE = _re.compile(r"[^a-z]")
+
+
+def parse_answer(text: str) -> tuple[str | None, bool]:
+    """Extract the LAST <answer>...</answer> match. Returns (plaintext, found).
+
+    Strips any non-letter content inside the tag (whitespace, asterisks,
+    quotes, punctuation), since instruction-tuned models often add cosmetic
+    formatting even when asked not to.
+    """
+    matches = ANSWER_RE.findall(text)
+    if not matches:
+        return None, False
+    cleaned = _NON_LETTER_RE.sub("", matches[-1].lower())
+    return cleaned, True
+
+
+def tokens_before_answer(tok, raw_output: str) -> int | None:
+    """Approximate token count up to (and not including) the first <answer> tag."""
+    idx = raw_output.find("<answer>")
+    if idx < 0:
+        return None
+    prefix = raw_output[:idx]
+    return len(tok(prefix, add_special_tokens=False).input_ids)

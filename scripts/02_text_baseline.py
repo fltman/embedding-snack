@@ -39,6 +39,10 @@ def parse_args():
     p.add_argument("--n-exchanges", type=int, default=3, help="Rounds per episode (A+B counts as 1 round).")
     p.add_argument("--enable-thinking", action="store_true", help="Run the eval pass with Qwen3 thinking on (default off).")
     p.add_argument("--out-name", type=str, default=None, help="Override the run directory name.")
+    p.add_argument("--dataset", type=str, default="data/cipher_v2_test.jsonl",
+                   help="Test dataset (relative to repo root).")
+    p.add_argument("--key-direction", type=str, default="encoding",
+                   choices=["encoding", "decoding"])
     return p.parse_args()
 
 
@@ -50,11 +54,12 @@ def main() -> None:
     run_dir = EXPERIMENTS_DIR / run_name
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    test_path = DATA_DIR / "cipher_test.jsonl"
+    test_path = ROOT / args.dataset
     test = list(read_jsonl(test_path))
     test = test[: args.n]
     print(f"[config] device={device}  n={len(test)}  n_exchanges={args.n_exchanges}  "
-          f"enable_thinking={args.enable_thinking}  run_dir={run_dir}")
+          f"enable_thinking={args.enable_thinking}  key_direction={args.key_direction}  "
+          f"dataset={args.dataset}  run_dir={run_dir}")
 
     # Save the config used for this run.
     config = {
@@ -67,6 +72,7 @@ def main() -> None:
         "n_episodes": len(test),
         "n_exchanges": args.n_exchanges,
         "enable_thinking": args.enable_thinking,
+        "key_direction": args.key_direction,
         "test_dataset": str(test_path.relative_to(ROOT)),
         "timestamp": timestamp,
     }
@@ -91,6 +97,7 @@ def main() -> None:
                 model_a, tok_a, model_b, tok_b, ep,
                 n_exchanges=args.n_exchanges,
                 enable_thinking=args.enable_thinking,
+                key_direction=args.key_direction,
             )
             elapsed = time.time() - t0
             result["elapsed_seconds"] = elapsed
@@ -120,6 +127,12 @@ def main() -> None:
         "mean_total_tokens": statistics.mean(total_tokens_per_ep),
         "mean_elapsed_seconds": statistics.mean(times),
         "median_elapsed_seconds": statistics.median(times),
+        "format_compliance_rate": (
+            statistics.mean(1 if r else 0 for r in (
+                json.loads(line)["answer_tag_found"]
+                for line in log_path.read_text().splitlines()
+            ))
+        ),
     }
     (run_dir / "summary.json").write_text(json.dumps(summary, indent=2))
     print(f"\n[summary] {json.dumps(summary, indent=2)}")

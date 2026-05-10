@@ -1,0 +1,14 @@
+{
+  "ep": 4,
+  "ciphertext": "head",
+  "plaintext_gt": "kicf",
+  "key": "cblfigakdejh",
+  "raw_output": "Let's decode the ciphertext \"head\" using the given substitution cipher table:\n\n- **h** \u2192 **k**\n- **e** \u2192 **i**\n- **a** \u2192 **c**\n- **d** \u2192 **f**\n\nSo, \"head\" decodes to \"kifc\".\n\n<answer>kifc</answer>",
+  "answer_tag_found": true,
+  "parsed_plaintext": "kifc",
+  "char_acc": 0.5,
+  "exact_match": false,
+  "tokens_used": 69,
+  "tokens_used_before_answer_tag": 60,
+  "elapsed": 6.935631036758423
+}

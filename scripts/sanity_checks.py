@@ -39,13 +39,19 @@ from src.baselines.text_chat import (  # noqa: E402
     run_episode,
 )
 from src.models import DEFAULT_MODEL_A, DEFAULT_MODEL_B, load_pair, pick_device  # noqa: E402
-from src.tasks.cipher_decode import alphabet_for_key, char_accuracy, read_jsonl  # noqa: E402
+from src.tasks.cipher_decode import (  # noqa: E402
+    alphabet_for_key,
+    char_accuracy,
+    parse_answer as _parse_answer_shared,
+    read_jsonl,
+    tokens_before_answer as _tokens_before_answer_shared,
+)
 
 DATA_DIR = ROOT / "data"
 N_EPISODES = 20
 
 
-SOLO_PROMPT_TEMPLATE = """\
+SOLO_PROMPT_ENCODING = """\
 Here is a substitution cipher key. Each line shows how a plaintext letter \
 encodes to a ciphertext letter (left side is plaintext, right side is ciphertext):
 
@@ -64,31 +70,27 @@ Replace YOUR_PLAINTEXT_HERE with the decoded plaintext (lowercase a-z only, \
 no spaces, no punctuation). Do not put anything after the closing tag."""
 
 
-ANSWER_RE = re.compile(r"<answer>(.*?)</answer>", re.IGNORECASE | re.DOTALL)
-NON_LETTER_RE = re.compile(r"[^a-z]")
+SOLO_PROMPT_DECODING = """\
+Here is a substitution cipher decoding table. Each line maps a CIPHERTEXT \
+letter to its PLAINTEXT decoding (left side is ciphertext, right side is plaintext):
+
+{key_lines}
+
+Use this table to decode the ciphertext below. For each ciphertext letter, \
+look it up on the LEFT and read off the plaintext letter on the right.
+
+Ciphertext: {ciphertext}
+
+You may show your work if helpful. Then on the FINAL LINE, output exactly:
+<answer>YOUR_PLAINTEXT_HERE</answer>
+
+Replace YOUR_PLAINTEXT_HERE with the decoded plaintext (lowercase a-z only, \
+no spaces, no punctuation). Do not put anything after the closing tag."""
 
 
-def parse_answer(text: str) -> tuple[str | None, bool]:
-    """Extract the LAST <answer>...</answer> match.
-
-    Strips any non-letter content inside the tag (whitespace, punctuation,
-    asterisks, quotes), since instruction-tuned models often add cosmetic
-    formatting even when asked not to. Returns (plaintext, found).
-    """
-    matches = ANSWER_RE.findall(text)
-    if not matches:
-        return None, False
-    cleaned = NON_LETTER_RE.sub("", matches[-1].lower())
-    return cleaned, True
-
-
-def tokens_before_answer(tok, raw_output: str) -> int | None:
-    """Approximate token count up to (and not including) the first <answer> tag."""
-    idx = raw_output.find("<answer>")
-    if idx < 0:
-        return None
-    prefix = raw_output[:idx]
-    return len(tok(prefix, add_special_tokens=False).input_ids)
+# Re-exported for backwards compatibility — definitions live in src.tasks.cipher_decode.
+parse_answer = _parse_answer_shared
+tokens_before_answer = _tokens_before_answer_shared
 
 
 B_SYSTEM_WITH_EXAMPLE = (
@@ -113,14 +115,22 @@ B_SYSTEM_WITH_EXAMPLE = (
 
 
 def format_key_lines(key: str) -> str:
+    """Render `alphabet[i] -> key[i]` lines, one per row.
+
+    Interpretation depends on `key_direction` of the dataset:
+      - encoding: key[i] is the ciphertext for plaintext alphabet[i].
+      - decoding: key[i] is the plaintext for ciphertext alphabet[i].
+    The text formatting is identical; only the prompt wording differs.
+    """
     alphabet = alphabet_for_key(key)
     return "\n".join(f"{alphabet[i]} -> {key[i]}" for i in range(len(alphabet)))
 
 
-def run_solo(model, tok, episodes, max_new_tokens=500) -> list[dict]:
+def run_solo(model, tok, episodes, max_new_tokens=500, key_direction: str = "encoding") -> list[dict]:
+    template = SOLO_PROMPT_ENCODING if key_direction == "encoding" else SOLO_PROMPT_DECODING
     results = []
     for i, ep in enumerate(episodes):
-        prompt = SOLO_PROMPT_TEMPLATE.format(
+        prompt = template.format(
             key_lines=format_key_lines(ep["key"]),
             ciphertext=ep["ciphertext"],
         )
@@ -223,6 +233,10 @@ def main() -> None:
                    help="Path to the JSONL test dataset (relative to repo root).")
     p.add_argument("--n", type=int, default=N_EPISODES,
                    help="How many episodes from the dataset.")
+    p.add_argument("--key-direction", type=str, default="encoding",
+                   choices=["encoding", "decoding"],
+                   help="How the dataset's `key` field should be interpreted: "
+                        "encoding (a -> X, default) or decoding (X -> a).")
     args = p.parse_args()
 
     device = pick_device()
@@ -240,8 +254,8 @@ def main() -> None:
         share_model_weights=True,  # 16 GB Mac — two separate 4B copies don't fit
     )
 
-    print(f"\n=== Check 1: SOLO upper bound (n={len(episodes)}) ===")
-    solo_results = run_solo(model_a, tok_a, episodes)
+    print(f"\n=== Check 1: SOLO upper bound (n={len(episodes)}, key_direction={args.key_direction}) ===")
+    solo_results = run_solo(model_a, tok_a, episodes, key_direction=args.key_direction)
     solo_summary = summarize("solo", solo_results)
 
     out_dir = ROOT / "experiments" / args.out_name

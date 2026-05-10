@@ -5,44 +5,58 @@ Both sides use the same chat template config (`enable_thinking=False`) to
 keep the comparison with the adapter condition apples-to-apples.
 
 Per Phase 2 spec: each episode gets `n_exchanges` rounds (default 3), then
-B is explicitly prompted for the plaintext.
+B is explicitly prompted for the plaintext via the same `<answer>` tag
+protocol used in the solo sanity check.
 """
 from __future__ import annotations
 
-import re
-
 import torch
 
-from src.tasks.cipher_decode import char_accuracy
+from src.tasks.cipher_decode import char_accuracy, parse_answer, tokens_before_answer
 
 A_SYSTEM = (
     "You are Player A in a cooperative cipher-decoding game with Player B. "
-    "You see only the CIPHERTEXT. Player B sees only the cipher KEY "
-    "(a 26-character permutation of the alphabet a-z, where the i-th character "
-    "is the image of the i-th letter, i.e. key[0] is the encoding of 'a'). "
+    "You see only the CIPHERTEXT. Player B sees the cipher key. "
     "Cooperate with Player B to recover the plaintext. "
     "Keep messages short. Do not output the final plaintext yourself — "
     "Player B will produce it."
 )
 
-B_SYSTEM = (
+B_SYSTEM_ENCODING = (
     "You are Player B in a cooperative cipher-decoding game with Player A. "
-    "You see only the cipher KEY (a 26-character permutation of a-z, where "
-    "the i-th character is the image of the i-th letter — so to DECODE, "
-    "find each ciphertext character in the key and read off the position). "
+    "You see only the ENCODING key: a permutation of the alphabet (lowercase letters), "
+    "where key[i] is the ciphertext image of the i-th plaintext letter. "
+    "To DECODE a ciphertext letter, find that letter in the key string and output "
+    "the alphabet letter at that position. "
     "Player A sees only the ciphertext. "
     "Cooperate with Player A to recover the plaintext. "
-    "Keep messages short. When explicitly asked for the plaintext at the end, "
-    "output ONLY the plaintext, lowercase letters only, no quotes, no explanation."
+    "Keep messages short. "
+    "When asked for the final answer, output it on the FINAL LINE as exactly:\n"
+    "<answer>YOUR_PLAINTEXT_HERE</answer>"
+)
+
+B_SYSTEM_DECODING = (
+    "You are Player B in a cooperative cipher-decoding game with Player A. "
+    "You see only a DECODING key: a permutation of the alphabet (lowercase letters), "
+    "where the i-th character is the plaintext for the i-th ciphertext letter. "
+    "To DECODE a ciphertext letter C, find C's alphabet position i and output key[i]. "
+    "Player A sees only the ciphertext. "
+    "Cooperate with Player A to recover the plaintext. "
+    "Keep messages short. "
+    "When asked for the final answer, output it on the FINAL LINE as exactly:\n"
+    "<answer>YOUR_PLAINTEXT_HERE</answer>"
 )
 
 FINAL_PROMPT = (
-    "Now output ONLY the decoded plaintext. Lowercase letters only. "
-    "No quotes. No prefix. No explanation. Just the plaintext."
+    "Now produce the final answer. You may show brief work first, then on the FINAL LINE "
+    "output exactly:\n"
+    "<answer>YOUR_PLAINTEXT_HERE</answer>\n"
+    "Replace YOUR_PLAINTEXT_HERE with the decoded plaintext (lowercase letters only)."
 )
 
-_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
-_LETTERS_RE = re.compile(r"[a-z]+")
+
+# Backwards-compat alias used by the older sanity_checks two-shot run.
+B_SYSTEM = B_SYSTEM_ENCODING
 
 
 def _apply_template(tok, messages, enable_thinking: bool = False) -> str:
@@ -86,25 +100,6 @@ def chat_generate(
     return decoded, int(new_tokens.shape[0])
 
 
-def parse_plaintext(text: str) -> str:
-    """Heuristic extractor for B's final message.
-
-    1. Strip any <think>...</think> block (in case thinking leaks through).
-    2. Lowercase, trim.
-    3. Find all runs of [a-z]+. Prefer runs of plausible plaintext length
-       (3-20). Among those, prefer the longest. If nothing in range, take
-       the last run. If no letters at all, return "".
-    """
-    text = _THINK_RE.sub("", text).strip().lower()
-    runs = _LETTERS_RE.findall(text)
-    if not runs:
-        return ""
-    in_range = [r for r in runs if 3 <= len(r) <= 20]
-    if in_range:
-        return max(in_range, key=len)
-    return runs[-1]
-
-
 def run_episode(
     model_a,
     tok_a,
@@ -112,16 +107,20 @@ def run_episode(
     tok_b,
     episode: dict,
     n_exchanges: int = 3,
-    max_message_tokens: int = 160,
-    max_final_tokens: int = 40,
+    max_message_tokens: int = 200,
+    max_final_tokens: int = 500,
     enable_thinking: bool = False,
+    key_direction: str = "encoding",
     a_system: str = A_SYSTEM,
-    b_system: str = B_SYSTEM,
+    b_system: str | None = None,
 ) -> dict:
     """Run a single episode through the text-chat baseline."""
     ciphertext = episode["ciphertext"]
     key = episode["key"]
     plaintext = episode["plaintext"]
+
+    if b_system is None:
+        b_system = B_SYSTEM_ENCODING if key_direction == "encoding" else B_SYSTEM_DECODING
 
     a_history = [
         {"role": "system", "content": a_system},
@@ -161,20 +160,25 @@ def run_episode(
         max_new_tokens=max_final_tokens, enable_thinking=enable_thinking,
     )
     b_tokens += n_final
-    pred = parse_plaintext(final_raw)
+    parsed, found = parse_answer(final_raw)
+    pred = parsed or ""
+    n_before_tag = tokens_before_answer(tok_b, final_raw)
 
     return {
         "episode_id": episode["id"],
         "plaintext": plaintext,
         "ciphertext": ciphertext,
         "key": key,
+        "key_direction": key_direction,
         "transcript": transcript,
         "final_b_raw": final_raw,
+        "answer_tag_found": found,
         "predicted_plaintext": pred,
         "char_accuracy": char_accuracy(pred, plaintext),
         "exact_match": pred == plaintext,
         "a_tokens": a_tokens,
         "b_tokens": b_tokens,
         "total_tokens": a_tokens + b_tokens,
+        "tokens_used_before_answer_tag": n_before_tag,
         "n_exchanges": n_exchanges,
     }
