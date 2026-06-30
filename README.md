@@ -1,5 +1,7 @@
 # Embedding Snack
 
+[![Support me on Patreon](https://img.shields.io/badge/Patreon-Support%20my%20work-FF424D?style=flat&logo=patreon&logoColor=white)](https://www.patreon.com/AndersBjarby)
+
 This is the unfinished half of an experiment looking for a continuation. See [post-länk].
 
 Two frozen LLMs talk to each other through a learned adapter that bridges their hidden-state spaces, instead of through text. The full experiment is seven phases; this repo contains phases 1 through 3 — enough to establish a clean text-only baseline and confirm the protocol learns nothing without training. Phase 4 (training the adapter) requires GPU hardware that wasn't available locally.
